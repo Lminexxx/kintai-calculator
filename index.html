@@ -1,0 +1,111 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>勤怠計算ツール</title>
+<style>
+body{font-family:-apple-system,BlinkMacSystemFont,sans-serif;background:#f5f7fa;margin:0;padding:15px;color:#333}
+.card{background:#fff;border-radius:12px;padding:18px;margin-bottom:15px;box-shadow:0 2px 8px rgba(0,0,0,0.08)}
+h2{margin:0 0 15px;font-size:18px;color:#2c3e50;border-bottom:2px solid #3498db;padding-bottom:5px}
+.row{display:flex;gap:10px;margin-bottom:12px}
+.col{flex:1}
+label{display:block;font-size:12px;font-weight:bold;margin-bottom:4px;color:#666}
+input{width:100%;padding:10px;border:1px solid #ccc;border-radius:6px;font-size:16px;box-sizing:border-box}
+button{width:100%;padding:12px;background:#3498db;color:#fff;border:none;border-radius:6px;font-size:16px;font-weight:bold;margin-top:5px}
+.btn-dl{background:#2ecc71;margin-top:10px}
+table{width:100%;border-collapse:collapse;margin-top:10px;font-size:13px}
+th,td{border-bottom:1px solid #eee;padding:8px 4px;text-align:center}
+th{background:#f8f9fa;color:#555}
+.result-box{background:#e8f4fd;border-radius:8px;padding:10px;margin-top:10px;font-size:14px}
+.result-box strong{color:#2980b9;font-size:16px}
+</style>
+</head>
+<body>
+<div class="card">
+<h2>勤怠入力</h2>
+<div class="row">
+<div class="col"><label>日付</label><input type="date" id="date"></div>
+</div>
+<div class="row">
+<div class="col"><label>出勤時刻</label><input type="time" id="start"></div>
+<div class="col"><label>退勤時刻</label><input type="time" id="end"></div>
+</div>
+<button onclick="addLog()">計算・記録する</button>
+</div>
+
+<div class="card">
+<h2>勤怠履歴</h2>
+<div id="latestResult" class="result-box" style="display:none;"></div>
+<table>
+<thead><tr><th>日付</th><th>出勤(15分切上)</th><th>退勤</th><th>休憩</th><th>実労働時間</th></tr></thead>
+<tbody id="logTable"></tbody>
+</table>
+<button class="btn-dl" onclick="downloadCSV()">CSV保存（スプレッドシート用）</button>
+</div>
+
+<script>
+document.getElementById('date').valueAsDate = new Date();
+let logs = JSON.parse(localStorage.getItem('kintai_logs') || '[]');
+render();
+
+function addLog(){
+  const d = document.getElementById('date').value;
+  const s = document.getElementById('start').value;
+  const e = document.getElementById('end').value;
+  if(!d || !s || !e){ alert('日付・出勤・退勤をすべて入力してください'); return; }
+  
+  const [sH, sM] = s.split(':').map(Number);
+  let roundedM = Math.ceil(sM / 15) * 15;
+  let roundedH = sH;
+  if(roundedM === 60){ roundedM = 0; roundedH += 1; }
+  const roundedStart = `${String(roundedH).padStart(2,'0')}:${String(roundedM).padStart(2,'0')}`;
+
+  const startMin = roundedH * 60 + roundedM;
+  const [eH, eM] = e.split(':').map(Number);
+  const endMin = eH * 60 + eM;
+  
+  let grossMin = endMin - startMin;
+  if(grossMin < 0) grossMin += 24 * 60;
+
+  let breakMin = 0;
+  if(grossMin > 8 * 60) breakMin = 60;
+  else if(grossMin > 6 * 60) breakMin = 45;
+
+  const workMin = grossMin - breakMin;
+  const wH = Math.floor(workMin / 60);
+  const wM = workMin % 60;
+  const workText = `${wH}時間${wM}分`;
+
+  const item = { date: d, start: s, roundedStart: roundedStart, end: e, breakMin: breakMin, workText: workText };
+  logs.unshift(item);
+  localStorage.setItem('kintai_logs', JSON.stringify(logs));
+  render();
+}
+
+function render(){
+  const tbody = document.getElementById('logTable');
+  tbody.innerHTML = '';
+  logs.forEach(l => {
+    tbody.innerHTML += `<tr><td>${l.date.slice(5)}</td><td>${l.roundedStart}</td><td>${l.end}</td><td>${l.breakMin}分</td><td><strong>${l.workText}</strong></td></tr>`;
+  });
+  if(logs.length > 0){
+    const r = logs[0];
+    const resBox = document.getElementById('latestResult');
+    resBox.style.display = 'block';
+    resBox.innerHTML = `最新記録: <strong>${r.workText}</strong> （出勤:${r.roundedStart} / 休憩:${r.breakMin}分）`;
+  }
+}
+
+function downloadCSV(){
+  if(logs.length===0){ alert('データがありません'); return; }
+  let csv = "日付,打刻出勤,15分切上出勤,退勤,休憩(分),実労働時間\n";
+  logs.forEach(l => { csv += `${l.date},${l.start},${l.roundedStart},${l.end},${l.breakMin},${l.workText}\n`; });
+  const blob = new Blob([new Uint8Array([0xEF, 0xBB, 0xBF]), csv], { type: 'text/csv' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = '勤怠記録.csv';
+  a.click();
+}
+</script>
+</body>
+</html>
