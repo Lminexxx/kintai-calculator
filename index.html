@@ -65,7 +65,7 @@ label {
   color: var(--text-sub);
 }
 
-input {
+input, select {
   width: 100%;
   padding: 10px 12px;
   border: 1.5px solid var(--border-color);
@@ -78,7 +78,7 @@ input {
   transition: border-color 0.2s, background 0.2s;
 }
 
-input:focus {
+input:focus, select:focus {
   border-color: var(--primary);
   background: #fff;
 }
@@ -216,8 +216,27 @@ th {
     <div class="col"><label>日付</label><input type="date" id="date"></div>
   </div>
   <div class="row">
-    <div class="col"><label>出勤時刻</label><input type="time" id="start"></div>
-    <div class="col"><label>退勤時刻</label><input type="time" id="end"></div>
+    <div class="col">
+      <label>出勤時刻</label>
+      <select id="start"></select>
+    </div>
+    <div class="col">
+      <label>退勤時刻</label>
+      <input type="time" id="end">
+    </div>
+  </div>
+  <div class="row">
+    <div class="col">
+      <label>休憩時間</label>
+      <select id="break">
+        <option value="auto">自動計算（6h超45分/8h超60分）</option>
+        <option value="0">0分（なし）</option>
+        <option value="15">15分</option>
+        <option value="30">30分</option>
+        <option value="45">45分</option>
+        <option value="60">60分（1時間）</option>
+      </select>
+    </div>
   </div>
   <button onclick="addLog()">計算・記録する</button>
 </div>
@@ -230,7 +249,7 @@ th {
     <thead>
       <tr>
         <th>日付</th>
-        <th>出勤(15分切上)</th>
+        <th>出勤</th>
         <th>退勤</th>
         <th>休憩</th>
         <th>実労働時間</th>
@@ -244,6 +263,22 @@ th {
 </div>
 
 <script>
+// 初期化処理：9:00〜23:45までの15分刻みの選択肢を生成
+(function initStartSelect() {
+  const startSelect = document.getElementById('start');
+  for (let h = 9; h < 24; h++) {
+    for (let m = 0; m < 60; m += 15) {
+      const hh = String(h).padStart(2, '0');
+      const mm = String(m).padStart(2, '0');
+      const val = `${hh}:${mm}`;
+      const opt = document.createElement('option');
+      opt.value = val;
+      opt.textContent = val;
+      startSelect.appendChild(opt);
+    }
+  }
+})();
+
 document.getElementById('date').valueAsDate = new Date();
 let logs = JSON.parse(localStorage.getItem('kintai_logs') || '[]');
 render();
@@ -252,32 +287,34 @@ function addLog() {
   const d = document.getElementById('date').value;
   const s = document.getElementById('start').value;
   const e = document.getElementById('end').value;
+  const bSelect = document.getElementById('break').value;
+
   if (!d || !s || !e) { 
     alert('日付・出勤・退勤をすべて入力してください'); 
     return; 
   }
   
   const [sH, sM] = s.split(':').map(Number);
-  let roundedM = Math.ceil(sM / 15) * 15;
-  let roundedH = sH;
-  if (roundedM === 60) { 
-    roundedM = 0; 
-    roundedH = (roundedH + 1) % 24; 
-  }
-  const roundedStart = `${String(roundedH).padStart(2, '0')}:${String(roundedM).padStart(2, '0')}`;
+  const startMin = sH * 60 + sM;
 
-  const startMin = roundedH * 60 + roundedM;
   const [eH, eM] = e.split(':').map(Number);
   const endMin = eH * 60 + eM;
   
   let grossMin = endMin - startMin;
-  if (grossMin < 0) grossMin += 24 * 60;
+  if (grossMin < 0) grossMin += 24 * 60; // 日またぎ対応
 
+  // 休憩時間の決定（自動または指定値）
   let breakMin = 0;
-  if (grossMin > 8 * 60) breakMin = 60;
-  else if (grossMin > 6 * 60) breakMin = 45;
+  if (bSelect === 'auto') {
+    if (grossMin > 8 * 60) breakMin = 60;
+    else if (grossMin > 6 * 60) breakMin = 45;
+  } else {
+    breakMin = parseInt(bSelect, 10);
+  }
 
-  const workMin = grossMin - breakMin;
+  let workMin = grossMin - breakMin;
+  if (workMin < 0) workMin = 0;
+
   const wH = Math.floor(workMin / 60);
   const wM = workMin % 60;
   const workText = `${wH}時間${wM}分`;
@@ -285,10 +322,9 @@ function addLog() {
   const item = { 
     date: d, 
     start: s, 
-    roundedStart: roundedStart, 
     end: e, 
     breakMin: breakMin, 
-    workMin: workMin, // 合計計算用に実労働時間（分）も保存
+    workMin: workMin,
     workText: workText 
   };
 
@@ -326,7 +362,6 @@ function render() {
   let totalMin = 0;
 
   logs.forEach((l, index) => {
-    // 互換性維持（過去のデータに workMin がない場合の補正）
     let min = l.workMin;
     if (min === undefined) {
       const match = l.workText.match(/(\d+)時間(\d+)分/);
@@ -337,7 +372,7 @@ function render() {
     const tr = document.createElement('tr');
     tr.innerHTML = `
       <td>${escapeHtml(l.date.slice(5))}</td>
-      <td>${escapeHtml(l.roundedStart)}</td>
+      <td>${escapeHtml(l.start)}</td>
       <td>${escapeHtml(l.end)}</td>
       <td>${escapeHtml(String(l.breakMin))}分</td>
       <td><strong>${escapeHtml(l.workText)}</strong></td>
@@ -347,7 +382,6 @@ function render() {
   });
 
   if (logs.length > 0) {
-    // 合計時間の表示計算
     const totalH = Math.floor(totalMin / 60);
     const totalM = totalMin % 60;
     const totalDecimal = (totalMin / 60).toFixed(2);
@@ -362,7 +396,7 @@ function render() {
     const r = logs[0];
     resBox.style.display = 'flex';
     resBox.innerHTML = `
-      <div>最新記録: <strong>${escapeHtml(r.workText)}</strong> （出勤:${escapeHtml(r.roundedStart)} / 休憩:${escapeHtml(String(r.breakMin))}分）</div>
+      <div>最新記録: <strong>${escapeHtml(r.workText)}</strong> （出勤:${escapeHtml(r.start)} / 休憩:${escapeHtml(String(r.breakMin))}分）</div>
       <button class="btn-del-sm" onclick="deleteLog(0)">削除</button>
     `;
   } else {
@@ -376,9 +410,9 @@ function downloadCSV() {
     alert('データがありません'); 
     return; 
   }
-  let csv = "日付,打刻出勤,15分切上出勤,退勤,休憩(分),実労働時間\n";
+  let csv = "日付,出勤,退勤,休憩(分),実労働時間\n";
   logs.forEach(l => { 
-    csv += `${l.date},${l.start},${l.roundedStart},${l.end},${l.breakMin},${l.workText}\n`; 
+    csv += `${l.date},${l.start},${l.end},${l.breakMin},${l.workText}\n`; 
   });
   const blob = new Blob([new Uint8Array([0xEF, 0xBB, 0xBF]), csv], { type: 'text/csv' });
   const a = document.createElement('a');
