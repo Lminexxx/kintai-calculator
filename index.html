@@ -229,7 +229,7 @@ th {
     <div class="col">
       <label>休憩時間</label>
       <select id="break">
-        <option value="auto">自動計算（拘束時間6h超で45分/8h超で60分）</option>
+        <option value="auto">自動計算（実労働6h超で45分/8h超で60分）</option>
         <option value="0">0分（なし）</option>
         <option value="15">15分</option>
         <option value="30">30分</option>
@@ -300,19 +300,25 @@ function addLog() {
   const [eH, eM] = e.split(':').map(Number);
   const endMin = eH * 60 + eM;
   
-  // 拘束時間（出勤から退勤までの総時間）
   let grossMin = endMin - startMin;
   if (grossMin < 0) grossMin += 24 * 60; // 日またぎ対応
 
-  // 休憩時間の決定（自動の場合は拘束時間を基準に判定）
+  // 休憩時間の決定（自動計算の場合のロジック）
   let breakMin = 0;
   if (bSelect === 'auto') {
-    if (grossMin > 8 * 60) {
-      breakMin = 60; // 拘束時間が8時間を超えている場合
-    } else if (grossMin > 6 * 60) {
-      breakMin = 45; // 拘束時間が6時間を超えている場合
+    // まず仮に45分引いてみて、実労働時間が6時間（360分）超かを判定する
+    let tempWorkMin = grossMin - 45;
+    if (tempWorkMin > 6 * 60) {
+      // 45分引いても6時間を超える場合、さらに8時間（480分）を超えるか判定
+      // 45分引いた結果が8時間を超えていれば60分休憩、そうでなければ45分休憩
+      let tempWorkMin60 = grossMin - 60;
+      if (tempWorkMin60 > 8 * 60) {
+        breakMin = 60;
+      } else {
+        breakMin = 45;
+      }
     } else {
-      breakMin = 0;  // 6時間以下の場合は休憩なし
+      breakMin = 0; // 6時間以下なら休憩なし
     }
   } else {
     breakMin = parseInt(bSelect, 10);
